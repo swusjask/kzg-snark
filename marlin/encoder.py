@@ -222,11 +222,12 @@ class Encoder:
         }
     
 if __name__ == "__main__":
-    from sage.all import load
     from py_ecc.optimized_bn128 import curve_order
-    import random
+    import random, pickle
 
-    RICS_INSTANCE = load("r1cs_instance.sobj")
+    with open("R1CS_INSTANCE.pkl", "rb") as f:
+        RICS_INSTANCE = pickle.load(f)
+
     A, B, C, z = RICS_INSTANCE["A"], RICS_INSTANCE["B"], RICS_INSTANCE["C"], RICS_INSTANCE["z"]
 
     encoder = Encoder(curve_order)

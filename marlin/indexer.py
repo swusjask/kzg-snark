@@ -101,13 +101,14 @@ class Indexer:
     
 
 if __name__ == "__main__":
-    from sage.all import load
+    import pickle
     
     print("Testing Marlin Indexer")
     print("=" * 60)
     
-    # Load a test R1CS instance
-    RICS_INSTANCE = load("r1cs_instance.sobj")
+
+    with open("R1CS_INSTANCE.pkl", "rb") as f:
+        RICS_INSTANCE = pickle.load(f)
     A, B, C, z = RICS_INSTANCE["A"], RICS_INSTANCE["B"], RICS_INSTANCE["C"], RICS_INSTANCE["z"]
     
     # Initialize the indexer
