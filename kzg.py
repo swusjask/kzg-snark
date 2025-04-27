@@ -1,5 +1,4 @@
 from sage.all import GF, PolynomialRing
-import random
 
 
 class KZG:
@@ -160,9 +159,6 @@ class KZG:
         z = self.Fq(z)
         xi = self.Fq(xi)
 
-        # Compute evaluations for each polynomial
-        evaluations = [int(poly(z)) for poly in sage_polynomials]
-
         # Compute the linear combination: p(X) = Σᵢ ξⁱ·pᵢ(X)
         combined_poly = self.R(0)  # Zero polynomial
         for i, poly in enumerate(sage_polynomials):
@@ -175,7 +171,7 @@ class KZG:
         # Commit to the witness polynomial
         proof = self.commit(ck, [witness_poly])[0]
 
-        return (evaluations, proof)
+        return proof
 
     def check(self, rk, commitments, z, evaluations, proof, xi):
         """
@@ -310,8 +306,7 @@ class KZG:
         return left_pairing == right_pairing
 
 
-def test_kzg_verification():
-    """Test the KZG verification functionality"""
+if __name__ == "__main__":
     print("Testing KZG Batch Verification")
     print("=" * 60)
 
@@ -335,7 +330,7 @@ def test_kzg_verification():
     ]
 
     # Commit to each list
-    commitment_list = [kzg.commit(ck, poly_list) for poly_list in poly_list]
+    commitment_list = [kzg.commit(ck, polys) for polys in poly_list]
 
     # Generate random evaluation points
     z_values = [F.random_element() for _ in range(len(poly_list))]
@@ -350,8 +345,8 @@ def test_kzg_verification():
     ]
 
     # Extract evaluations and proofs
-    evaluations_list = [p_and_e[0] for p_and_e in proofs_and_evals]
-    proof_list = [p_and_e[1] for p_and_e in proofs_and_evals]
+    evaluations_list = [[int(poly(z)) for poly in polys] for polys, z in zip(poly_list, z_values)]
+    proof_list = [kzg.open(ck, polys, z, xi) for polys, z, xi in zip(poly_list, z_values, xi_values)]
 
     print("\nVerifying each list individually:")
     individual_results = []
@@ -360,18 +355,19 @@ def test_kzg_verification():
     ):
         result = kzg.check(rk, commitments, z, evaluations, proof, xi)
         individual_results.append(result)
-        print(f"List {i+1}: {'PASS' if result else 'FAIL'}")
+        print(f"{'✅' if result else '❌'} List {i+1}: {result}")
 
     print("\nVerifying all list with batch verification:")
     batch_result = kzg.batch_check(
         rk, commitment_list, z_values, evaluations_list, proof_list, xi_values
     )
-    print(f"Batch verification: {'PASS' if batch_result else 'FAIL'}")
+    print(f"{'✅' if batch_result else '❌'} Batch verification: {batch_result}")
 
     # Ensure batch verification matches individual verifications
     expected_batch_result = all(individual_results)
+    match_result = batch_result == expected_batch_result
     print(
-        f"\nBatch verification matches individual results: {batch_result == expected_batch_result}"
+        f"{'✅' if match_result else '❌'} Batch verification matches individual results: {match_result}"
     )
 
     # Test with an invalid proof
@@ -393,19 +389,14 @@ def test_kzg_verification():
             proof_list[0],
             xi_values[0],
         )
-        print(f"Modified list 1 verification: {'PASS' if individual_result else 'FAIL'}")
+        print(
+            f"{'✅' if not individual_result else '❌'} Modified list 1 verification: {individual_result}"
+        )
 
         # Verify with batch verification
         batch_result = kzg.batch_check(
             rk, commitment_list, z_values, evaluations_list, proof_list, xi_values
         )
         print(
-            f"Batch verification with invalid proof: {'PASS' if batch_result else 'FAIL'}"
+            f"{'✅' if not batch_result else '❌'} Batch verification with invalid proof: {batch_result}"
         )
-
-        # Restore the original value
-        evaluations_list[0][0] = original_value
-
-
-if __name__ == "__main__":
-    test_kzg_verification()

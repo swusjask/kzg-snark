@@ -31,6 +31,7 @@ temp/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+*.ipynb
 
 # IDE specific files
 .idea/
