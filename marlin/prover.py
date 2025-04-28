@@ -55,6 +55,7 @@ class Prover:
         
         # Create a transcript for the Fiat-Shamir transform
         transcript = Transcript("marlin-proof", Fq)
+        transcript.append_message("public-inputs", x)
         
         # Phase 1: Encode witness and linear combinations
         z = list(x) + list(w)  # Full variable assignment

@@ -53,6 +53,7 @@ class Verifier:
         R = self.kzg.R
         Fq = self.kzg.Fq
         transcript = Transcript("marlin-proof", Fq)
+        transcript.append_message("public-inputs", x)
         
         # Recreate the transcript to generate the same challenges as the prover
         transcript.append_message("round1-commitments", first_round_commitments)

@@ -8,10 +8,10 @@ from fft_ff import fft_ff_interpolation
 class Encoder:
     def __init__(self, q):
         """
-        Initialize the R1CS encoder with a KZG polynomial commitment scheme instance.
+        Initialize the R1CS encoder with the specified field.
 
         Args:
-            kzg: KZG polynomial commitment scheme instance
+            q: Prime field size
         """
         self.Fq = GF(q)  # Finite field GF(curve_order)
         self.R = PolynomialRing(self.Fq, 'X')
