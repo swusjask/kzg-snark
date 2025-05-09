@@ -1,7 +1,7 @@
-import sys
+import sys, os
 from sage.all import prod
 
-sys.path.insert(0, '/mnt/d/Kuliah/ctf/research/kzg-snark')
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from kzg import KZG
 from fft_ff import fft_ff_interpolation
 from encoder import Encoder
@@ -145,10 +145,6 @@ class Prover:
         # Get evaluation challenge
         zeta = transcript.get_challenge("zeta")
         
-        # Ensure zeta is not in H
-        while zeta in H:
-            zeta = transcript.get_challenge("zeta-retry")
-        
         # Compute opening evaluations
         a_zeta = a_poly(zeta)
         b_zeta = b_poly(zeta)
@@ -187,7 +183,6 @@ class Prover:
         # Get the opening proof for polynomials at zeta
         W_z = self.kzg.open(ck, zeta_polys, zeta, v)
         W_zw = self.kzg.open(ck, [z_poly], zeta * g, v)
-        
         
         # Assemble the final proof
         proof = {
@@ -335,7 +330,6 @@ class Prover:
         PI_zeta = PI(zeta)
         
         # Compute the individual terms
-        
         # Gate constraints
         term1 = a_zeta * b_zeta * qM + a_zeta * qL + b_zeta * qR + c_zeta * qO + PI_zeta + qC
         
@@ -435,6 +429,5 @@ if __name__ == "__main__":
     print(f"\nProof components:")
     print(f"- Number of commitments: {len(proof['commitments'])}")
     print(f"- Number of evaluations: {len(proof['evaluations'])}")
-    print(f"- Number of challenges: {len(proof['challenges'])}")
     
     print("\n✅ PLONK Prover test completed successfully!")

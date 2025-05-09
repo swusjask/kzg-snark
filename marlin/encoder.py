@@ -1,7 +1,7 @@
-import sys
+import sys, os
 from sage.all import vector, prod, PolynomialRing, GF
 
-sys.path.insert(0, '/mnt/d/Kuliah/ctf/research/kzg-snark')
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from fft_ff import fft_ff_interpolation
 
 

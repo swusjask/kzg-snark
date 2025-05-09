@@ -1,7 +1,7 @@
 from sage.all import prod
-import sys
+import sys, os
 
-sys.path.insert(0, '/mnt/d/Kuliah/ctf/research/kzg-snark')
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from kzg import KZG
 from fft_ff import fft_ff, fft_ff_interpolation
 from encoder import Encoder
