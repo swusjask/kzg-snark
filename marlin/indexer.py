@@ -116,6 +116,10 @@ class Indexer:
                 "n": self.encoder.n,
                 "m": self.encoder.m,
                 "g_H": self.encoder.g_H,
+            },
+            "vanishing_polys": {
+                "v_H": self.encoder.v_H,
+                "v_K": self.encoder.v_K,
             }
         }
         

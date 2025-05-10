@@ -12,8 +12,7 @@ class Prover:
     Marlin zkSNARK prover implementation.
     
     The prover generates zero-knowledge proofs for an R1CS instance following
-    the optimized Marlin protocol described in the paper. It uses the polynomial
-    commitment scheme to create a succinct proof of knowledge of a valid witness.
+    the optimized protocol described in Appendix E of the Marlin paper.
     """
     
     def __init__(self, curve_type="bn254"):
@@ -182,30 +181,50 @@ class Prover:
         
         # Get third round challenge
         beta_2 = transcript.get_challenge("beta_2")
+
+        # p1(x) = zA(β₁)*zB(x) - zC(x) - h_0(x)*v_H(β₁)
+        p_1 = zA_masked(beta_1) * zB_masked - zC_masked - h_0 * v_H(beta_1)
+        
+        # p2(x) = s(x) + r(α, β₁)*(η_A*zA(β₁) + η_B*zB(x) + η_C*zC(x)) - t(β₁)*z(x) - h_1(x)*v_H(β₁) - β₁g_1(x)
+        z = w_masked * v_H_x(beta_1) + x_poly(beta_1)
+        p_2 = s + r(alpha, beta_1) * (eta_A * zA_masked(beta_1) + eta_B * zB_masked + eta_C * zC_masked) - t_beta1 * z - h_1 * v_H(beta_1) - beta_1 * g_1
+
+        # p3(x) = h_2(x)*v_K(β₂) - a(x) + b(β₂)*(β₂g_2(x) + t(β₁)/m)
+        # a(x) = Σ η_M * v_H(β₁) * v_H(α) * val_M(x) Π_{N≠M} (β₁ - row_N(β₂))(α - col_N(β₂))
+
+        a_lin, b_lin = self._compute_a_b_linear_polynomials(
+            polynomials, eta_A, eta_B, eta_C, beta_1, beta_2, alpha, v_H, R, Fq
+        )
+
+        p_3 = h_2 * v_K(beta_2) - a_lin + b_lin * (beta_2 * g_2 + t_beta1 / m)
+
+        assert p_1(beta_1) == 0, "p_1 polynomial is not well-defined"
+        assert p_2(beta_1) == 0, "p_2 polynomial is not well-defined"
+        assert p_3(beta_2) == 0, "p_3 polynomial is not well-defined"
         
         # Evaluate polynomials at the challenge points
-        polys_beta1 = [w_masked, zA_masked, zB_masked, zC_masked, h_0, s, t, g_1, h_1]
+        polys_beta1 = [zA_masked, t]
         evals_beta1 = [p(beta_1) for p in polys_beta1]
         
         # Polynomials for beta_2 evaluation
-        indexer_poly_list = []
+        polys_beta2 = []
         for matrix in ["A", "B", "C"]:
-            for poly_type in ["row", "col", "val"]:
+            for poly_type in ["row", "col"]:
                 key = f"{poly_type}_{matrix}"
-                indexer_poly_list.append(polynomials[key])
+                polys_beta2.append(polynomials[key])
                 
-        polys_beta2 = [g_2, h_2] + indexer_poly_list
         evals_beta2 = [p(beta_2) for p in polys_beta2]
         
         # Add evaluations to transcript
         transcript.append_message("evaluations-beta1", evals_beta1)
         transcript.append_message("evaluations-beta2", evals_beta2)
         
-        # Get opening challenges for batch verification
         xi_1 = transcript.get_challenge("xi_1")
         xi_2 = transcript.get_challenge("xi_2")
         
         # Generate KZG batch proofs
+        polys_beta1 = [p_1, p_2] + polys_beta1
+        polys_beta2 = [p_3] + polys_beta2
         proof_beta1 = self.kzg.open(ck, polys_beta1, beta_1, xi_1)
         proof_beta2 = self.kzg.open(ck, polys_beta2, beta_2, xi_2)
         
@@ -333,6 +352,55 @@ class Prover:
             # Update b(X) with this matrix's factors
             b *= (beta_1 - row) * (alpha - col)
         
+        return a, b
+    
+    def _compute_a_b_linear_polynomials(self, polynomials, eta_A, eta_B, eta_C, beta_1, beta_2, alpha, v_H, R, Fq):
+        """
+        Compute linearized a(X) polynomial and b field element used in the third sumcheck verification.
+        
+        This method creates linearized versions of the a(X) and b values at the challenge point beta_2,
+        which are critical components for the verification equation in p3(X).
+        
+        Args:
+            polynomials: Dictionary containing all indexed polynomials
+            eta_A, eta_B, eta_C: Random challenge coefficients for matrices
+            beta_1, beta_2, alpha: Challenge points for evaluation
+            v_H: Vanishing polynomial for domain H
+            R: Polynomial ring
+            Fq: Finite field
+            
+        Returns:
+            tuple: (a_poly, b_value) - Linearized polynomial and scalar value
+        """
+        row_A = polynomials["row_A"]
+        col_A = polynomials["col_A"]
+        val_A = polynomials["val_A"]
+        
+        row_B = polynomials["row_B"]
+        col_B = polynomials["col_B"]
+        val_B = polynomials["val_B"]
+        
+        row_C = polynomials["row_C"]
+        col_C = polynomials["col_C"]
+        val_C = polynomials["val_C"]
+        a = R(0)
+        b = Fq(1)
+
+        for matrix_idx, (eta, row, col, val) in enumerate([
+            (eta_A, row_A, col_A, val_A),
+            (eta_B, row_B, col_B, val_B),
+            (eta_C, row_C, col_C, val_C)
+        ]):
+            other_product = Fq(1)
+            for other_idx, (other_row, other_col) in enumerate([
+                (row_A, col_A), (row_B, col_B), (row_C, col_C)
+            ]):
+                if other_idx != matrix_idx:
+                    other_product *= (beta_1 - other_row(beta_2)) * (alpha - other_col(beta_2))
+            
+            a += eta * v_H(beta_1) * v_H(alpha) * val * other_product
+            b *= (beta_1 - row(beta_2)) * (alpha - col(beta_2))
+
         return a, b
 
     def _compute_f2_polynomial(self, polynomials, eta_A, eta_B, eta_C, beta_1, alpha, v_H, v_K, K, g_K, Fq, R):
