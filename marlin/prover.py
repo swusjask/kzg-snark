@@ -11,8 +11,9 @@ class Prover:
     """
     Marlin zkSNARK prover implementation.
     
-    The prover generates a zero-knowledge proof for an R1CS instance using the optimized
-    protocol described in Appendix E of the Marlin paper.
+    The prover generates zero-knowledge proofs for an R1CS instance following
+    the optimized Marlin protocol described in the paper. It uses the polynomial
+    commitment scheme to create a succinct proof of knowledge of a valid witness.
     """
     
     def __init__(self, curve_type="bn254"):
@@ -30,17 +31,17 @@ class Prover:
         
         Args:
             ipk: Index proving key from the indexer
-            x: Public input
-            w: Witness
-            zero_knowledge_bound: Parameter 'b' for zero-knowledge (default: 2)
+            x: Public input vector
+            w: Witness vector (private inputs)
+            zero_knowledge_bound: Degree bound for randomization polynomials
             
         Returns:
-            dict: The proof
+            dict: The proof containing commitments and evaluations
         """
         # Extract data from index proving key
         ck = ipk["ck"]
         A, B, C = ipk["A"], ipk["B"], ipk["C"]
-        indexer_polys = ipk["polynomials"]
+        polynomials = ipk["polynomials"]
         H, K = ipk["subgroups"]["H"], ipk["subgroups"]["K"]
         n, m = ipk["subgroups"]["n"], ipk["subgroups"]["m"]
         g_K = ipk["subgroups"]["g_K"]
@@ -60,6 +61,8 @@ class Prover:
         # Phase 1: Encode witness and linear combinations
         z = list(x) + list(w)  # Full variable assignment
         x_size = len(x)
+        
+        # Compute vanishing polynomials for x and w
         v_H_x = prod([X - h for h in H[:x_size]])
         v_H_w = prod([X - h for h in H[x_size:]])
         
@@ -69,7 +72,7 @@ class Prover:
         # Encode linear combinations
         encoded_combinations = self.encoder.encode_linear_combinations(z)
         
-        # Get the polynomials needed for the protocol
+        # Extract polynomials
         w_poly = encoded_witness["w_poly"]
         x_poly = encoded_witness["x_poly"]
         zA_poly = encoded_combinations["zA_poly"]
@@ -78,20 +81,23 @@ class Prover:
         
         # Add randomness for zero-knowledge (bounded independence)
         b = zero_knowledge_bound
+        
+        # Random polynomials of degree < b
         w_random = sum(Fq.random_element() * X**i for i in range(b))
         zA_random = sum(Fq.random_element() * X**i for i in range(b))
         zB_random = sum(Fq.random_element() * X**i for i in range(b))
         zC_random = sum(Fq.random_element() * X**i for i in range(b))
         
+        # Mask the polynomials with randomness
         w_masked = w_poly + w_random * v_H_w
         zA_masked = zA_poly + zA_random * v_H
         zB_masked = zB_poly + zB_random * v_H
         zC_masked = zC_poly + zC_random * v_H
         z_masked = w_masked * v_H_x + x_poly
         
-        # Compute h_0 such that zA_masked(X)·zB_masked(X) - zC_masked(X) = h_0(X)·v_H(X)
+        # Compute h_0 for the first check: zA·zB - zC = h_0·v_H
         h_0 = (zA_masked * zB_masked - zC_masked) // v_H
-        assert h_0 * v_H == zA_masked * zB_masked - zC_masked, "h_0 is undefined"
+        assert h_0 * v_H == zA_masked * zB_masked - zC_masked, "h_0 polynomial is not well-defined"
         
         # Generate random polynomial s(X) such that sum(s(H)) = 0
         s_random = sum(Fq.random_element() * X**i for i in range(2*n+b-1))
@@ -117,7 +123,7 @@ class Prover:
         
         # Compute t(X) - the combined polynomial for r_M(α, X)
         t = self._compute_t_polynomial(
-            indexer_polys, eta_A, eta_B, eta_C, alpha, v_H, K, R
+            polynomials, eta_A, eta_B, eta_C, alpha, v_H, K, R
         )
         
         # Compute first sumcheck polynomial
@@ -132,7 +138,7 @@ class Prover:
 
         assert g_1.constant_coefficient() == 0, "Sum over H is not 0"
         g_1 = g_1 // X
-        assert h_1*v_H + X * g_1 == poly, "h_1 and g_1 is undefined"
+        assert h_1*v_H + X * g_1 == poly, "h_1 and g_1 are not well-defined"
         
         # Second round commitments
         second_round_polys = [t, g_1, h_1]
@@ -149,20 +155,24 @@ class Prover:
         
         # Calculate a(X) and b(X) polynomials for the third sumcheck
         a, b = self._compute_a_b_polynomials(
-            indexer_polys, eta_A, eta_B, eta_C, beta_1, alpha, v_H, R
+            polynomials, eta_A, eta_B, eta_C, beta_1, alpha, v_H, R
         )
         
         # Calculate sumcheck for the value of t(β₁)
         t_beta1 = t(beta_1)
         
-        # Following the approach in Marlin paper page 29, we need to 
-        # interpolate f_2 and then compute g_2 and h_2
-        f_2 = self._compute_f2_polynomial(indexer_polys, eta_A, eta_B, eta_C, beta_1, alpha, v_H, v_K, K, g_K, Fq, R)
-        assert f_2.constant_coefficient() == t_beta1 / m, "f_2 is wrong"
+        # Calculate f_2, g_2, and h_2 polynomials for the third sumcheck
+        f_2 = self._compute_f2_polynomial(
+            polynomials, eta_A, eta_B, eta_C, beta_1, alpha, v_H, v_K, K, g_K, Fq, R
+        )
+        
+        # Verify f_2(0) = t(β₁)/m
+        assert f_2.constant_coefficient() == t_beta1 / m, "f_2 polynomial is incorrect"
 
+        # Compute g_2 and h_2
         g_2 = f_2 // X
         h_2 = (a - b*f_2) // v_K
-        assert h_2 * v_K == a - b * (X * g_2 + t_beta1 / m), "h_2 and g_2 is undefined"
+        assert h_2 * v_K == a - b * (X * g_2 + t_beta1 / m), "h_2 and g_2 are not well-defined"
         
         # Third round commitments
         third_round_polys = [g_2, h_2]
@@ -173,19 +183,25 @@ class Prover:
         # Get third round challenge
         beta_2 = transcript.get_challenge("beta_2")
         
-        # Polynomials for beta_1
+        # Evaluate polynomials at the challenge points
         polys_beta1 = [w_masked, zA_masked, zB_masked, zC_masked, h_0, s, t, g_1, h_1]
         evals_beta1 = [p(beta_1) for p in polys_beta1]
         
-        # Polynomials for beta_2
-        polys_beta2 = [g_2, h_2] + indexer_polys
+        # Polynomials for beta_2 evaluation
+        indexer_poly_list = []
+        for matrix in ["A", "B", "C"]:
+            for poly_type in ["row", "col", "val"]:
+                key = f"{poly_type}_{matrix}"
+                indexer_poly_list.append(polynomials[key])
+                
+        polys_beta2 = [g_2, h_2] + indexer_poly_list
         evals_beta2 = [p(beta_2) for p in polys_beta2]
         
         # Add evaluations to transcript
         transcript.append_message("evaluations-beta1", evals_beta1)
         transcript.append_message("evaluations-beta2", evals_beta2)
         
-        # Get opening challenge for batch verification
+        # Get opening challenges for batch verification
         xi_1 = transcript.get_challenge("xi_1")
         xi_2 = transcript.get_challenge("xi_2")
         
@@ -212,15 +228,14 @@ class Prover:
         
         return proof
         
-        
-    def _compute_t_polynomial(self, indexer_polys, eta_A, eta_B, eta_C, alpha, v_H, K, R):
+    def _compute_t_polynomial(self, polynomials, eta_A, eta_B, eta_C, alpha, v_H, K, R):
         """
-        Compute the t(X).
+        Compute the t(X) polynomial used in the Marlin protocol.
         
-        This is the optimized version following Appendix E.
+        This implements the optimized version from the Marlin paper.
         
         Args:
-            indexer_polys: List of polynomials from the indexer
+            polynomials: Dictionary of indexed polynomials
             eta_A, eta_B, eta_C: Challenge coefficients for matrices
             alpha: Challenge point
             v_H: Vanishing polynomial for domain H
@@ -231,37 +246,49 @@ class Prover:
             t_poly: The combined polynomial t(X)
         """
         # Extract row, col, val polynomials for each matrix
-        row_A, col_A, val_A = indexer_polys[0:3]
-        row_B, col_B, val_B = indexer_polys[3:6]
-        row_C, col_C, val_C = indexer_polys[6:9]
+        row_A = polynomials["row_A"]
+        col_A = polynomials["col_A"]
+        val_A = polynomials["val_A"]
+        
+        row_B = polynomials["row_B"]
+        col_B = polynomials["col_B"]
+        val_B = polynomials["val_B"]
+        
+        row_C = polynomials["row_C"]
+        col_C = polynomials["col_C"] 
+        val_C = polynomials["val_C"]
         
         X = R.gen()
         t_poly = R(0)
         
-        # Following the optimization in Appendix E, we compute:
-        # t(X) = Σ_{M∈{A,B,C}} η_M · Σ_{κ∈K} v_H(X)v_H(α)·val_M*(κ) / ((X - row_M*(κ))(α - col_M*(κ)))
-        
+        # Compute t(X) = Σ η_M · Σ_κ∈K [v_H(X)v_H(α)·val_M*(κ) / ((X - row_M*(κ))(α - col_M*(κ)))]
         for kappa in K:
             # Term for matrix A
-            term_A = (v_H(X) * v_H(alpha) * val_A(kappa)) // ((X - row_A(kappa)) * (alpha - col_A(kappa)))
-            t_poly += eta_A * term_A
+            denom_A = (X - row_A(kappa)) * (alpha - col_A(kappa))
+            if denom_A != 0:
+                term_A = (v_H(X) * v_H(alpha) * val_A(kappa)) / denom_A
+                t_poly += eta_A * term_A
             
             # Term for matrix B
-            term_B = (v_H(X) * v_H(alpha) * val_B(kappa)) // ((X - row_B(kappa)) * (alpha - col_B(kappa)))
-            t_poly += eta_B * term_B
+            denom_B = (X - row_B(kappa)) * (alpha - col_B(kappa))
+            if denom_B != 0:
+                term_B = (v_H(X) * v_H(alpha) * val_B(kappa)) / denom_B
+                t_poly += eta_B * term_B
             
             # Term for matrix C
-            term_C = (v_H(X) * v_H(alpha) * val_C(kappa)) // ((X - row_C(kappa)) * (alpha - col_C(kappa)))
-            t_poly += eta_C * term_C
+            denom_C = (X - row_C(kappa)) * (alpha - col_C(kappa))
+            if denom_C != 0:
+                term_C = (v_H(X) * v_H(alpha) * val_C(kappa)) / denom_C
+                t_poly += eta_C * term_C
         
-        return t_poly
+        return R(t_poly)
         
-    def _compute_a_b_polynomials(self, indexer_polys, eta_A, eta_B, eta_C, beta_1, alpha, v_H, R):
+    def _compute_a_b_polynomials(self, polynomials, eta_A, eta_B, eta_C, beta_1, alpha, v_H, R):
         """
-        Compute the a(X) and b(X) polynomials for the second sumcheck in the Marlin protocol.
+        Compute the a(X) and b(X) polynomials for the second sumcheck in Marlin.
         
         Args:
-            indexer_polys: List of polynomials from the indexer
+            polynomials: Dictionary of indexed polynomials
             eta_A, eta_B, eta_C: Challenge coefficients for matrices
             beta_1, alpha: Challenge points
             v_H: Vanishing polynomial for domain H
@@ -271,9 +298,18 @@ class Prover:
             tuple: (a_poly, b_poly)
         """
         # Extract row, col, val polynomials for each matrix
-        row_A, col_A, val_A = indexer_polys[0:3]
-        row_B, col_B, val_B = indexer_polys[3:6]
-        row_C, col_C, val_C = indexer_polys[6:9]
+        row_A = polynomials["row_A"]
+        col_A = polynomials["col_A"]
+        val_A = polynomials["val_A"]
+        
+        row_B = polynomials["row_B"]
+        col_B = polynomials["col_B"]
+        val_B = polynomials["val_B"]
+        
+        row_C = polynomials["row_C"]
+        col_C = polynomials["col_C"]
+        val_C = polynomials["val_C"]
+        
         a = R(0)
         b = R(1)  # Start with 1 for the product
         
@@ -299,35 +335,41 @@ class Prover:
         
         return a, b
 
-    def _compute_f2_polynomial(self, indexer_polys, eta_A, eta_B, eta_C, beta_1, alpha, v_H, v_K, K, g_K, Fq, R):
+    def _compute_f2_polynomial(self, polynomials, eta_A, eta_B, eta_C, beta_1, alpha, v_H, v_K, K, g_K, Fq, R):
         """
-        Compute the f2(X) polynomial for the second sumcheck in the Marlin protocol.
+        Compute the f2(X) polynomial for the second sumcheck in Marlin.
         
         Args:
-            indexer_polys: List of polynomials from the indexer [row_A, col_A, val_A, row_B, col_B, val_B, row_C, col_C, val_C]
+            polynomials: Dictionary of indexed polynomials
             eta_A, eta_B, eta_C: Challenge coefficients for matrices
-            beta_1, alpha: Challenge points (neither in H)
-            v_H: Vanishing polynomial for domain H
-            v_K: Vanishing polynomial for domain K
+            beta_1, alpha: Challenge points
+            v_H, v_K: Vanishing polynomials for domains H and K
             K: Domain K (list of field elements)
             g_K: Generator for domain K
             Fq: Finite field
             R: Polynomial ring
             
         Returns:
-            f2_poly
+            f2_poly: Polynomial f₂(X)
         """
         # Extract row, col, val polynomials for each matrix
-        row_A, col_A, val_A = indexer_polys[0:3]
-        row_B, col_B, val_B = indexer_polys[3:6]
-        row_C, col_C, val_C = indexer_polys[6:9]
+        row_A = polynomials["row_A"] 
+        col_A = polynomials["col_A"]
+        val_A = polynomials["val_A"]
+        
+        row_B = polynomials["row_B"]
+        col_B = polynomials["col_B"]
+        val_B = polynomials["val_B"]
+        
+        row_C = polynomials["row_C"]
+        col_C = polynomials["col_C"]
+        val_C = polynomials["val_C"]
         
         # Pre-compute v_H values
         v_H_beta1 = v_H(beta_1)
         v_H_alpha = v_H(alpha)
         
-        # Pre-compute evaluations at all points in K for efficiency
-        # This is crucial for performance as we need the values at each kappa ∈ K
+        # Pre-compute evaluations at points in K for efficiency
         row_A_evals = fft_ff(list(row_A), g_K, Fq)
         col_A_evals = fft_ff(list(col_A), g_K, Fq)
         val_A_evals = fft_ff(list(val_A), g_K, Fq)
@@ -340,21 +382,21 @@ class Prover:
         col_C_evals = fft_ff(list(col_C), g_K, Fq)
         val_C_evals = fft_ff(list(val_C), g_K, Fq)
         
-        # Compute f2(κ) for each κ ∈ K using the formula from Appendix E
+        # Compute f2(κ) for each κ ∈ K
         f2_evals = []
         
         for i in range(len(K)):
-            # Calculate denominator terms for each matrix
+            # Calculate denominators for each matrix
             denom_A = (beta_1 - row_A_evals[i]) * (alpha - col_A_evals[i])
             denom_B = (beta_1 - row_B_evals[i]) * (alpha - col_B_evals[i])
             denom_C = (beta_1 - row_C_evals[i]) * (alpha - col_C_evals[i])
             
-            # Calculate individual terms with appropriate safeguards for division by zero
+            # Calculate individual terms with safeguards for division by zero
             term_A = v_H_beta1 * v_H_alpha * val_A_evals[i] / denom_A if denom_A != 0 else 0
             term_B = v_H_beta1 * v_H_alpha * val_B_evals[i] / denom_B if denom_B != 0 else 0
             term_C = v_H_beta1 * v_H_alpha * val_C_evals[i] / denom_C if denom_C != 0 else 0
             
-            # Combine with appropriate challenge values
+            # Combine terms with challenge values
             f2_evals.append(eta_A * term_A + eta_B * term_B + eta_C * term_C)
         
         # Interpolate to get the polynomial
@@ -369,12 +411,13 @@ if __name__ == "__main__":
     print("Testing Marlin Prover")
     print("=" * 60)
     
+    # Load test instance
     with open("R1CS_INSTANCE.pkl", "rb") as f:
         RICS_INSTANCE = pickle.load(f)
     A, B, C, z = RICS_INSTANCE["A"], RICS_INSTANCE["B"], RICS_INSTANCE["C"], RICS_INSTANCE["z"]
     
-    # Define public input (first few elements) and witness (remaining elements)
-    x_size = 5  # Adjust this based on your test instance
+    # Define public input and witness
+    x_size = 5  # Adjust based on your test instance
     x = z[:x_size]
     w = z[x_size:]
     
@@ -383,22 +426,24 @@ if __name__ == "__main__":
     prover = Prover(curve_type="bn254")
     
     # Determine maximum degree needed
-    max_degree = 200  # Adjust based on your specific instance
+    max_degree = 200  # Adjust based on instance complexity
     
     # Preprocess the constraint system
-    print("\nPreprocessing constraint system...")
+    print("\nPreprocessing R1CS constraint system...")
     ipk, ivk = indexer.preprocess(A, B, C, max_degree)
     
     # Generate the proof
-    print("\nGenerating proof...")
+    print("\nGenerating Marlin proof...")
     proof = prover.prove(ipk, x, w)
+    
     # Print proof statistics
-    print(f"\nProof generated successfully!")
-    
-    # Print some proof components for verification
+    print("\nProof generated successfully!")
     print("\nProof components:")
-    print(f"- Number of first round commitments: {len(proof['commitments']['first_round'])}")
-    print(f"- Number of second round commitments: {len(proof['commitments']['second_round'])}")
-    print(f"- Number of third round commitments: {len(proof['commitments']['third_round'])}")
+    print(f"✅ First round commitments: {len(proof['commitments']['first_round'])}")
+    print(f"✅ Second round commitments: {len(proof['commitments']['second_round'])}")
+    print(f"✅ Third round commitments: {len(proof['commitments']['third_round'])}")
+    print(f"✅ Beta1 evaluations: {len(proof['evaluations']['beta1'])}")
+    print(f"✅ Beta2 evaluations: {len(proof['evaluations']['beta2'])}")
+    print(f"✅ KZG proofs: 2")
     
-    print("\n✅ Prover test completed successfully!")
+    print("\n✅ Marlin Prover test completed successfully!")

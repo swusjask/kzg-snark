@@ -2,12 +2,15 @@ from sage.all import *
 
 def fft_ff(coeffs, w, F):
     """
-    Compute the FFT of coeffs in a finite field using powers of w.
+    Compute the Fast Fourier Transform of coefficients in a finite field.
     
     Args:
-        coeffs: List of field elements
+        coeffs: List of field elements representing polynomial coefficients
         w: Primitive n-th root of unity in the field
         F: The finite field
+    
+    Returns:
+        List of field elements representing polynomial evaluations at powers of w
     """
     n = len(coeffs)
     if n == 1:
@@ -38,16 +41,19 @@ def ifft_ff(values, w, F):
     Compute the inverse FFT of values in a finite field.
     
     Args:
-        values: List of field elements
+        values: List of field elements representing polynomial evaluations
         w: Primitive n-th root of unity in the field
         F: The finite field
+    
+    Returns:
+        List of field elements representing polynomial coefficients
     """
     n = len(values)
-    # For inverse FFT, we use w^(-1) and divide results by n
+    # For inverse FFT, use w^(-1) and divide results by n
     w_inv = w**(-1)
     result = fft_ff(values, w_inv, F)
     
-    # Divide by n (multiply by n^(-1) in the F)
+    # Divide by n (multiply by n^(-1) in the field)
     n_inv = F(n)**(-1)
     return [x * n_inv for x in result]
 
@@ -59,6 +65,9 @@ def fft_ff_interpolation(values, g, F):
         values: List of field elements to interpolate (length must be power of 2)
         g: Generator element of order 2^k in the finite field
         F: The finite field
+    
+    Returns:
+        SageMath polynomial interpolating the provided values
     """
     n = len(values)
     # Ensure n is a power of 2

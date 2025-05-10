@@ -3,18 +3,19 @@ import struct
 
 class Transcript:
     """
-    Handles the protocol transcript and deterministic challenge generation for Fiat-Shamir transform.
+    Handles protocol transcript and deterministic challenge generation for Fiat-Shamir transform.
     
-    This class maintains the state of all messages exchanged during the protocol
-    and generates deterministic challenges that depend on the transcript history.
+    This class maintains the state of all messages exchanged during a zero-knowledge proof protocol
+    and generates deterministic challenges that depend on the cumulative transcript history.
+    It ensures that challenges are consistent between prover and verifier.
     """
     
     def __init__(self, label, F):
         """
-        Initialize a new transcript with a label.
+        Initialize a new transcript with a protocol label.
         
         Args:
-            label: A string label for this transcript instance
+            label: A string label identifying this protocol instance
             F: The finite field used in the protocol
         """
         self.label = label
@@ -23,34 +24,33 @@ class Transcript:
     
     def append_message(self, message_label, message_data):
         """
-        Append a message to the transcript.
+        Append a message to the transcript to update its state.
         
         Args:
-            message_label: A string label for this message
+            message_label: A string label for this message (e.g., "round1-commitment")
             message_data: The message data to append (will be serialized)
         """
-        
-        # Update the state
+        # Update the transcript state with the new message
         self._update_state(message_label, self._serialize(message_data))
     
     def get_challenge(self, label):
         """
-        Generate a deterministic challenge field element based on the current transcript.
+        Generate a deterministic challenge field element based on the current transcript state.
         
         Args:
-            label: A label for this challenge
+            label: A label for this challenge (e.g., "beta")
             
         Returns:
             A field element derived from the current transcript state
         """
-        # Update state with the challenge label
+        # Generate deterministic challenge from current state and label
         challenge_state = hashlib.sha256(self.state + label.encode()).digest()
         
-        # Convert the first 32 bytes of hash to an integer mod field order
+        # Convert the hash bytes to a field element
         challenge_int = int.from_bytes(challenge_state, byteorder='big')
         challenge = self.F(challenge_int)
         
-        # Update the transcript state with this challenge
+        # Update the transcript state to include this challenge
         self._update_state(label, challenge_state)
         
         return challenge
@@ -86,7 +86,7 @@ class Transcript:
     
     def _update_state(self, label, data):
         """
-        Update the internal state with a new message.
+        Update the internal transcript state with a new message.
         
         Args:
             label: Label for the message

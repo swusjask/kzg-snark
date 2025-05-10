@@ -102,7 +102,6 @@ class Verifier:
         # 1. Check entry-wise product: zA(β₁)·zB(β₁) - zC(β₁) = h₀(β₁)·v_H(β₁)
         v_H_beta1 = beta_1**n - 1  # v_H(β₁) = β₁^n - 1
         if zA_beta1 * zB_beta1 - zC_beta1 != h0_beta1 * v_H_beta1:
-            print("❌ Entry-wise product check failed")
             return False
         
         # 2. Check first sumcheck: s(β₁) + r(α,β₁)(Σ η_M·z_M(β₁)) - t(β₁)·z(β₁) = h₁(β₁)·v_H(β₁) + β₁·g₁(β₁)
@@ -131,7 +130,6 @@ class Verifier:
         expected_sumcheck1 = h1_beta1 * v_H_beta1 + beta_1 * g1_beta1
         
         if sumcheck1 != expected_sumcheck1:
-            print("❌ First sumcheck relation failed")
             return False
         
         # 3. Check second sumcheck relation with evaluations at β₂
@@ -173,9 +171,6 @@ class Verifier:
         expected_second_sumcheck = h2_beta2 * v_K_beta2
         
         if second_sumcheck != expected_second_sumcheck:
-            print("❌ Second sumcheck relation failed")
-            print(f"   Computed: {second_sumcheck}")
-            print(f"   Expected: {expected_second_sumcheck}")
             return False
         
         # Verify KZG proofs
@@ -183,13 +178,18 @@ class Verifier:
         beta1_commitments = [w_comm, zA_comm, zB_comm, zC_comm, h0_comm, s_comm, 
                              t_comm, g1_comm, h1_comm]
         if not self.kzg.check(rk, beta1_commitments, beta_1, evals_beta1, kzg_proof_beta1, xi_1):
-            print("❌ KZG proof verification failed for β₁")
             return False
         
         # 2. Verify proof for all evaluations at β₂ (including indexer polynomials)
-        beta2_commitments = [g2_comm, h2_comm] + index_commitments
+        # Convert the dictionary of index commitments to a list in the correct order
+        index_commitments_list = [
+            index_commitments["row_A"], index_commitments["col_A"], index_commitments["val_A"],
+            index_commitments["row_B"], index_commitments["col_B"], index_commitments["val_B"],
+            index_commitments["row_C"], index_commitments["col_C"], index_commitments["val_C"]
+        ]
+        
+        beta2_commitments = [g2_comm, h2_comm] + index_commitments_list
         if not self.kzg.check(rk, beta2_commitments, beta_2, evals_beta2, kzg_proof_beta2, xi_2):
-            print("❌ KZG proof verification failed for β₂")
             return False
         
         # All checks passed
@@ -204,13 +204,17 @@ if __name__ == "__main__":
     print("Testing Marlin Verifier")
     print("=" * 60)
     
-    # Load a test R1CS instance
+    # Load test instance
     with open("R1CS_INSTANCE.pkl", "rb") as f:
         RICS_INSTANCE = pickle.load(f)
-    A, B, C, z = RICS_INSTANCE["A"], RICS_INSTANCE["B"], RICS_INSTANCE["C"], RICS_INSTANCE["z"]
     
-    # Define public input (first few elements) and witness (remaining elements)
-    x_size = 5  # Adjust this based on your test instance
+    A = RICS_INSTANCE["A"]
+    B = RICS_INSTANCE["B"]
+    C = RICS_INSTANCE["C"]
+    z = RICS_INSTANCE["z"]
+    
+    # Define public input and witness
+    x_size = 5  # Number of public inputs
     x = z[:x_size]
     w = z[x_size:]
     
@@ -219,26 +223,46 @@ if __name__ == "__main__":
     prover = Prover(curve_type="bn254")
     verifier = Verifier(curve_type="bn254")
     
-    # Determine maximum degree needed
-    max_degree = 200  # Adjust based on your specific instance
-    
     # Preprocess the constraint system
-    print("\nPreprocessing constraint system...")
+    print("\nPreprocessing R1CS constraint system...")
+    max_degree = 200  # Appropriate for the test instance
     ipk, ivk = indexer.preprocess(A, B, C, max_degree)
     
+    # Print statistics about the processed instance
+    print(f"✅ Matrix dimensions: {A.nrows()} × {A.ncols()}")
+    print(f"✅ Non-zero elements: A: {len(A.nonzero_positions())}, "
+          f"B: {len(B.nonzero_positions())}, C: {len(C.nonzero_positions())}")
+    print(f"✅ Subgroup sizes: H: {ipk['subgroups']['n']}, K: {ipk['subgroups']['m']}")
+    
     # Generate the proof
-    print("\nGenerating proof...")
+    print("\nGenerating Marlin proof...")
     proof = prover.prove(ipk, x, w)
     
+    # Print proof statistics
+    print(f"✅ First round commitments: {len(proof['commitments']['first_round'])}")
+    print(f"✅ Second round commitments: {len(proof['commitments']['second_round'])}")
+    print(f"✅ Third round commitments: {len(proof['commitments']['third_round'])}")
+    
     # Verify the proof
-    print("\nVerifying proof...")
+    print("\nVerifying Marlin proof...")
     result = verifier.verify(ivk, x, proof)
     
     print(f"\n{'✅' if result else '❌'} Proof verification: {result}")
     
+    # Test with a tampered proof if verification succeeded
     if result:
-        print("\nTesting tampered proof...")
-        # Tamper with one of the evaluations
-        proof["evaluations"]["beta1"][0] = (proof["evaluations"]["beta1"][0] + 1) % verifier.kzg.curve_order
+        print("\nTesting with tampered proof...")
+        # Make a backup of the original value
+        original_value = proof["evaluations"]["beta1"][0]
+        
+        # Tamper with the proof by modifying an evaluation
+        proof["evaluations"]["beta1"][0] = (original_value + 1) % verifier.kzg.curve_order
+        
+        # Verify the tampered proof (should fail)
         tampered_result = verifier.verify(ivk, x, proof)
-        print(f"{'✅' if not tampered_result else '❌'} Tampered proof verification (should fail): {tampered_result}")
+        print(f"{'✅' if not tampered_result else '❌'} Tampered proof rejected: {not tampered_result}")
+        
+        # Restore the original value
+        proof["evaluations"]["beta1"][0] = original_value
+    
+    print("\n✅ Marlin Verifier test completed successfully!")

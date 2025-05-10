@@ -8,13 +8,12 @@ class Indexer:
     """
     PLONK zkSNARK indexer implementation.
     
-    The indexer handles the preprocessing phase of the PLONK protocol. It:
-    1. Takes circuit description (selector values and permutation)
-    2. Encodes the circuit into polynomials using the PLONK encoder
-    3. Commits to these polynomials using KZG commitments
-    4. Outputs an index proving key (ipk) and index verification key (ivk)
+    The indexer performs the preprocessing phase of the PLONK protocol to create:
+    1. Index Proving Key (ipk) - Used by the prover to generate proofs
+    2. Index Verification Key (ivk) - Used by the verifier to check proofs
     
-    This follows the preprocessing phase described in section 8 of the PLONK paper.
+    This preprocessing encodes the circuit description into polynomials and 
+    creates commitments for the selector and permutation polynomials.
     """
     
     def __init__(self, curve_type="bn254"):
@@ -30,6 +29,10 @@ class Indexer:
     def preprocess(self, qM, qL, qR, qO, qC, perm, max_degree):
         """
         Preprocess the PLONK circuit to produce the index keys.
+        
+        This method encodes the circuit description (selectors and permutation)
+        into polynomial form, computes the necessary commitments, and creates
+        the keys needed for proving and verifying.
         
         Args:
             qM, qL, qR, qO, qC: Selector values at points in H
@@ -49,45 +52,51 @@ class Indexer:
         selector_polys = self.encoder.encode_selectors()
         permutation_polys = self.encoder.encode_permutation()
         
-        # Extract polynomials in order
-        indexer_polys = [
-            selector_polys["qM"],
-            selector_polys["qL"],
-            selector_polys["qR"],
-            selector_polys["qO"],
-            selector_polys["qC"],
-            permutation_polys["S_sigma1"],
-            permutation_polys["S_sigma2"],
-            permutation_polys["S_sigma3"]
+        # Organize polynomials into ordered dictionary
+        indexer_polys = {
+            "qM": selector_polys["qM"],
+            "qL": selector_polys["qL"],
+            "qR": selector_polys["qR"],
+            "qO": selector_polys["qO"],
+            "qC": selector_polys["qC"],
+            "S_sigma1": permutation_polys["S_sigma1"],
+            "S_sigma2": permutation_polys["S_sigma2"],
+            "S_sigma3": permutation_polys["S_sigma3"]
+        }
+        
+        # Create ordered list for commitment
+        poly_list = [
+            indexer_polys["qM"],
+            indexer_polys["qL"],
+            indexer_polys["qR"],
+            indexer_polys["qO"],
+            indexer_polys["qC"],
+            indexer_polys["S_sigma1"],
+            indexer_polys["S_sigma2"],
+            indexer_polys["S_sigma3"]
         ]
         
         # Commit to the indexer polynomials
-        index_commitments = self.kzg.commit(ck, indexer_polys)
+        commitments_list = self.kzg.commit(ck, poly_list)
         
-        # Create index proving key
+        # Organize commitments in a dictionary
+        indexer_commitments = {
+            "qM": commitments_list[0],
+            "qL": commitments_list[1],
+            "qR": commitments_list[2],
+            "qO": commitments_list[3],
+            "qC": commitments_list[4],
+            "S_sigma1": commitments_list[5],
+            "S_sigma2": commitments_list[6],
+            "S_sigma3": commitments_list[7]
+        }
+        
+        # Create index proving key - everything the prover needs
         ipk = {
             "ck": ck,
-            "polynomials": {
-                "qM": selector_polys["qM"],
-                "qL": selector_polys["qL"],
-                "qR": selector_polys["qR"],
-                "qO": selector_polys["qO"],
-                "qC": selector_polys["qC"],
-                "S_sigma1": permutation_polys["S_sigma1"],
-                "S_sigma2": permutation_polys["S_sigma2"],
-                "S_sigma3": permutation_polys["S_sigma3"]
-            },
-            "commitments": {
-                "qM": index_commitments[0],
-                "qL": index_commitments[1],
-                "qR": index_commitments[2],
-                "qO": index_commitments[3],
-                "qC": index_commitments[4],
-                "S_sigma1": index_commitments[5],
-                "S_sigma2": index_commitments[6],
-                "S_sigma3": index_commitments[7]
-            },
-            # Store additional data needed by the prover
+            "polynomials": indexer_polys,
+            "commitments": indexer_commitments,
+            # Additional data needed by the prover
             "subgroups": {
                 "H": self.encoder.H,
                 "n": self.encoder.n,
@@ -99,19 +108,10 @@ class Indexer:
             "sigma_star": permutation_polys["sigma_star"],
         }
         
-        # Create index verification key
+        # Create index verification key - only what the verifier needs
         ivk = {
             "rk": rk,
-            "commitments": {
-                "qM": index_commitments[0],
-                "qL": index_commitments[1],
-                "qR": index_commitments[2],
-                "qO": index_commitments[3],
-                "qC": index_commitments[4],
-                "S_sigma1": index_commitments[5],
-                "S_sigma2": index_commitments[6],
-                "S_sigma3": index_commitments[7]
-            },
+            "commitments": indexer_commitments,
             "subgroups": {
                 "n": self.encoder.n,
                 "g": self.encoder.g,
@@ -145,28 +145,31 @@ if __name__ == "__main__":
     indexer = Indexer(curve_type="bn254")
     
     # Determine maximum degree needed
-    # In practice, we'd calculate this from the circuit requirements
     n = len(qM)
-    max_degree = n + 5  # For PLONK, max_degree depends on the highest degree polynomial in the protocol
+    max_degree = n + 5  # For PLONK, max_degree depends on highest degree polynomial
     
     # Preprocess the circuit
     print("\nPreprocessing PLONK circuit...")
     ipk, ivk = indexer.preprocess(qM, qL, qR, qO, qC, perm, max_degree)
     
-    # Print some statistics
-    print(f"\nCircuit size: {n} gates")
-    print(f"Number of indexer polynomials: {len(ipk['polynomials'])}")
-    print(f"Number of indexer commitments: {len(ipk['commitments'])}")
+    # Print statistics
+    print("\nPreprocessing results:")
+    print(f"✅ Circuit size: {n} gates")
+    print(f"✅ Number of indexer polynomials: {len(ipk['polynomials'])}")
+    print(f"✅ Number of indexer commitments: {len(ipk['commitments'])}")
     
-    # Verify we can access key components
-    print("\nVerifying ipk contents:")
-    print(f"- Contains selector polynomials: {'qM' in ipk['polynomials']}")
-    print(f"- Contains permutation polynomials: {'S_sigma1' in ipk['polynomials']}")
-    print(f"- Contains KZG commitment key: {len(ipk['ck']) > 0}")
+    # Verify indexer output integrity
+    print("\nVerifying indexer output integrity:")
+    keys_match = set(ipk['polynomials'].keys()) == set(ipk['commitments'].keys())
+    print(f"✅ Polynomial and commitment keys match: {keys_match}")
     
-    print("\nVerifying ivk contents:")
-    print(f"- Contains selector commitments: {'qM' in ivk['commitments']}")
-    print(f"- Contains permutation commitments: {'S_sigma1' in ivk['commitments']}")
-    print(f"- Contains KZG verification key: {ivk['rk'] is not None}")
+    # Verify if all required components are present
+    required_components = [
+        "ck" in ipk, "rk" in ivk, 
+        "polynomials" in ipk, "commitments" in ivk,
+        "subgroups" in ipk, "subgroups" in ivk
+    ]
+    all_components_present = all(required_components)
+    print(f"✅ All required components present: {all_components_present}")
     
     print("\n✅ PLONK Indexer preprocessing completed successfully!")

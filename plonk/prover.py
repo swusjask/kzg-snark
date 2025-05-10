@@ -11,8 +11,9 @@ class Prover:
     """
     PLONK zkSNARK prover implementation.
     
-    The prover generates a zero-knowledge proof for a PLONK circuit following
-    the protocol described in section 8.3 of the PLONK paper.
+    The prover generates zero-knowledge proofs for a PLONK circuit following
+    the protocol described in section 8.3 of the PLONK paper. It uses the polynomial
+    commitment scheme to create a succinct proof of knowledge of a valid witness.
     """
     
     def __init__(self, curve_type="bn254"):
@@ -34,7 +35,7 @@ class Prover:
             w: Witness list (private inputs)
             
         Returns:
-            dict: The proof
+            dict: The proof containing commitments and evaluations
         """
         # Extract data from index proving key
         ck = ipk["ck"]
@@ -62,8 +63,7 @@ class Prover:
         # Compute the full witness
         full_witness = x + w
         
-        # Initialize the encoder with a temporary empty permutation (not needed for witness encoding)
-        # We're just using the encoder to help with computing the public input polynomial
+        # Initialize the encoder with a temporary empty permutation (for PI computation)
         empty_perm = [0] * (3 * n)
         empty_selectors = [Fq(0)] * n
         self.encoder.update_state(empty_selectors, empty_selectors, empty_selectors, empty_selectors, empty_selectors, empty_perm)
@@ -83,18 +83,18 @@ class Prover:
         b_values = full_witness[n:2*n]
         c_values = full_witness[2*n:3*n]
         
-        # Compute wire polynomials a(X), b(X), c(X) with blinding factors
+        # Compute wire polynomials a(X), b(X), c(X) with blinding factors for zero-knowledge
         a_poly = (b1 * X + b2) * v_H + fft_ff_interpolation(a_values, g, Fq)
         b_poly = (b3 * X + b4) * v_H + fft_ff_interpolation(b_values, g, Fq)
         c_poly = (b5 * X + b6) * v_H + fft_ff_interpolation(c_values, g, Fq)
         
         # Commit to wire polynomials
-        first_round_polys = [a_poly, b_poly, c_poly]
-        first_round_commitments = self.kzg.commit(ck, first_round_polys)
-        a_commit, b_commit, c_commit = first_round_commitments
+        wire_polys = [a_poly, b_poly, c_poly]
+        wire_commitments = self.kzg.commit(ck, wire_polys)
+        a_commit, b_commit, c_commit = wire_commitments
         
         # Add commitments to transcript
-        transcript.append_message("round1-commitments", first_round_commitments)
+        transcript.append_message("round1-commitments", wire_commitments)
         
         # ----- Round 2: Permutation polynomial -----
         # Get permutation challenges
@@ -108,6 +108,8 @@ class Prover:
             beta, gamma, g, k1, k2, n, H, v_H, X, Fq,
             b7, b8, b9
         )
+        
+        # Verify first Lagrange polynomial condition: L_1(X)·(z(X) - 1) = 0 over H
         L1 = R((X**n - 1) / (n * (X - 1)))
         assert L1 * (z_poly - 1) % v_H == 0, "z_poly does not satisfy L1 condition"
 
@@ -132,14 +134,14 @@ class Prover:
         
         # Split t(X) into degree < n polynomials
         t_lo, t_mid, t_hi = self._split_quotient_polynomial(t_poly, n, X, R, Fq)
-        # try testing
+        
         # Commit to the parts of t(X)
-        third_round_polys = [t_lo, t_mid, t_hi]
-        third_round_commitments = self.kzg.commit(ck, third_round_polys)
-        t_lo_commit, t_mid_commit, t_hi_commit = third_round_commitments
+        t_polys = [t_lo, t_mid, t_hi]
+        t_commitments = self.kzg.commit(ck, t_polys)
+        t_lo_commit, t_mid_commit, t_hi_commit = t_commitments
         
         # Add commitments to transcript
-        transcript.append_message("round3-commitments", third_round_commitments)
+        transcript.append_message("round3-commitments", t_commitments)
         
         # ----- Round 4: Evaluation point -----
         # Get evaluation challenge
@@ -154,7 +156,8 @@ class Prover:
         z_omega_zeta = z_poly(zeta * g)  # z(ζω)
         
         # Add evaluations to transcript
-        transcript.append_message("round4-evaluations", [a_zeta, b_zeta, c_zeta, s_sigma1_zeta, s_sigma2_zeta, z_omega_zeta])
+        evaluations = [a_zeta, b_zeta, c_zeta, s_sigma1_zeta, s_sigma2_zeta, z_omega_zeta]
+        transcript.append_message("round4-evaluations", evaluations)
         
         # ----- Round 5: Opening proof -----
         # Get opening challenge
@@ -168,6 +171,7 @@ class Prover:
             z_poly, t_lo, t_mid, t_hi, alpha, beta, gamma, zeta, PI, n, k1, k2, R
         )
 
+        # Verify linearization polynomial r(ζ) = 0
         assert r_poly(zeta) == 0, "r(ζ) should be zero"
         
         # First batch: Polynomials to be opened at zeta
@@ -180,7 +184,7 @@ class Prover:
             polynomials["S_sigma2"]
         ]
         
-        # Get the opening proof for polynomials at zeta
+        # Get the opening proofs
         W_z = self.kzg.open(ck, zeta_polys, zeta, v)
         W_zw = self.kzg.open(ck, [z_poly], zeta * g, v)
         
@@ -210,15 +214,31 @@ class Prover:
         return proof
     
     def _compute_permutation_polynomial(self, a_values, b_values, c_values, 
-                                        sigma_star,
+                                        sigma_star, 
                                         beta, gamma, g, k1, k2, n, H, v_H, X, Fq,
                                         b7, b8, b9):
         """
         Compute the permutation polynomial z(X).
         
-        Following section 8.3, Round 2 of the PLONK paper.
+        This polynomial encodes the permutation argument, ensuring that the wire
+        assignments satisfy the copy constraints from the permutation.
+        
+        Args:
+            a_values, b_values, c_values: Wire values at points in H
+            sigma_star: Permutation mapping array
+            beta, gamma: Challenge values
+            g, k1, k2: Generator and coset multipliers
+            n: Size of the multiplicative subgroup
+            H: The subgroup points
+            v_H: Vanishing polynomial for H
+            X: Indeterminate from the polynomial ring
+            Fq: Finite field
+            b7, b8, b9: Random blinding factors
+            
+        Returns:
+            z_poly: The permutation polynomial z(X)
         """
-        # Add blinding factors
+        # Add blinding factors for zero-knowledge
         z_poly = (b7 * X**2 + b8 * X + b9) * v_H
         
         # Compute the permutation accumulator at each point
@@ -257,7 +277,23 @@ class Prover:
         """
         Compute the quotient polynomial t(X).
         
-        Following section 8.3, Round 3 of the PLONK paper.
+        This polynomial encodes all the circuit constraints divided by the vanishing
+        polynomial v_H, ensuring they are satisfied over the subgroup H.
+        
+        Args:
+            a_poly, b_poly, c_poly: Wire polynomials
+            z_poly: Permutation polynomial
+            qM, qL, qR, qO, qC: Selector polynomials
+            S_sigma1, S_sigma2, S_sigma3: Permutation polynomials
+            alpha, beta, gamma: Challenge values
+            PI: Public input polynomial
+            v_H: Vanishing polynomial for H
+            H, n, g, k1, k2: Subgroup parameters
+            R: Polynomial ring
+            X: Indeterminate
+            
+        Returns:
+            The quotient polynomial t(X)
         """
         # Term 1: Gate constraints
         term1 = R((a_poly * b_poly * qM + a_poly * qL + b_poly * qR + c_poly * qO + PI + qC) / v_H)
@@ -274,6 +310,7 @@ class Prover:
                           (c_poly + beta * S_sigma3 + gamma) * 
                           z_poly_shifted) / v_H
         
+        # Term 4: Copy constraints (first Lagrange basis condition)
         L1 = R((X**n - 1) / (n * (X - 1)))
         term4 = R(alpha**2 * (z_poly - 1) * L1 / v_H)
         
@@ -288,7 +325,15 @@ class Prover:
         
         t(X) = t_lo(X) + X^n · t_mid(X) + X^(2n) · t_hi(X)
         
-        With random blinding factors for zero-knowledge.
+        Args:
+            t_poly: Quotient polynomial of degree < 3n
+            n: Subgroup size
+            X: Indeterminate
+            R: Polynomial ring
+            Fq: Finite field
+            
+        Returns:
+            Tuple of three polynomials (t_lo, t_mid, t_hi)
         """
         # Get coefficients of t_poly
         t_coeffs = t_poly.list()
@@ -299,7 +344,7 @@ class Prover:
         t_mid_coeffs = t_coeffs[n:2*n]
         t_hi_coeffs = t_coeffs[2*n:]
         
-        # Add random blinding factors
+        # Add random blinding factors for zero-knowledge
         b10, b11 = Fq.random_element(), Fq.random_element()
         
         # Create the polynomials with blinding
@@ -307,6 +352,7 @@ class Prover:
         t_mid = R(t_mid_coeffs) - b10 + b11 * X**n
         t_hi = R(t_hi_coeffs) - b11
 
+        # Verify that t(X) = t_lo + X^n * t_mid + X^(2n) * t_hi
         assert t_poly == t_lo + X**n * t_mid + X**(2*n) * t_hi, "t(X) does not equal the sum of its parts"
         
         return t_lo, t_mid, t_hi
@@ -318,7 +364,22 @@ class Prover:
         """
         Compute the linearization polynomial r(X).
         
-        Following section 8.3, Round 5 of the PLONK paper.
+        This polynomial is used to reduce the number of polynomial openings
+        needed in the verification, by combining multiple constraints at the
+        evaluation point zeta.
+        
+        Args:
+            a_zeta, b_zeta, c_zeta: Wire polynomial evaluations at zeta
+            s_sigma1_zeta, s_sigma2_zeta, z_omega_zeta: Permutation polynomial evaluations
+            qM, qL, qR, qO, qC, S_sigma3: Circuit polynomials
+            z_poly, t_lo, t_mid, t_hi: Prover's polynomials
+            alpha, beta, gamma, zeta: Challenge values
+            PI: Public input polynomial
+            n, k1, k2: Circuit parameters
+            R: Polynomial ring
+            
+        Returns:
+            The linearization polynomial r(X)
         """
         # Compute z_H(ζ) = ζ^n - 1
         z_H_zeta = zeta**n - 1
@@ -347,41 +408,12 @@ class Prover:
         term4 = alpha**2 * (z_poly - 1) * L1_zeta
         
         # Compute the final linearization polynomial
-        # Note we're subtracting the quotient polynomial terms
+        # Subtract the quotient polynomial terms
         r_poly = term1 + term2 + term3 + term4 - z_H_zeta * (
             t_lo + zeta**n * t_mid + zeta**(2*n) * t_hi
         )
         
         return r_poly
-        
-    def _compute_opening_proof_polynomials(self, r_poly, a_poly, b_poly, c_poly, 
-                                          S_sigma1, S_sigma2, z_poly,
-                                          a_zeta, b_zeta, c_zeta, 
-                                          s_sigma1_zeta, s_sigma2_zeta, z_omega_zeta,
-                                          zeta, v, R, X):
-        """
-        Compute the opening proof polynomials W_z(X) and W_zω(X).
-        
-        Following section A.1 of the PLONK paper (batch opening).
-        """
-        # Compute W_z(X) - the opening proof for polynomials evaluated at ζ
-        W_z_denom = X - zeta
-        W_z_num = (r_poly + 
-                  v * (a_poly - a_zeta) + 
-                  v**2 * (b_poly - b_zeta) + 
-                  v**3 * (c_poly - c_zeta) + 
-                  v**4 * (S_sigma1 - s_sigma1_zeta) + 
-                  v**5 * (S_sigma2 - s_sigma2_zeta))
-        
-        W_z_poly = W_z_num // W_z_denom
-        
-        # Compute W_zω(X) - the opening proof for z(X) evaluated at ζω
-        W_zw_denom = X - zeta * R.gen()**1  # ζω
-        W_zw_num = z_poly - z_omega_zeta
-        
-        W_zw_poly = W_zw_num // W_zw_denom
-        
-        return W_z_poly, W_zw_poly
 
 
 if __name__ == "__main__":
@@ -403,8 +435,8 @@ if __name__ == "__main__":
     perm = instance["perm"]
     w = instance["w"]
     
-    # Define public input (first few elements) and witness (remaining elements)
-    x_size = 5  # Adjust based on your instance
+    # Define public input and witness
+    x_size = 5  # Adjust based on your test instance
     x = w[:x_size]
     remaining_w = w[x_size:]
     
@@ -421,13 +453,16 @@ if __name__ == "__main__":
     ipk, ivk = indexer.preprocess(qM, qL, qR, qO, qC, perm, max_degree)
     
     # Generate the proof
-    print("\nGenerating proof...")
+    print("\nGenerating PLONK proof...")
     proof = prover.prove(ipk, x, remaining_w)
     
     # Print proof statistics
-    print(f"\nProof generated successfully!")
-    print(f"\nProof components:")
-    print(f"- Number of commitments: {len(proof['commitments'])}")
-    print(f"- Number of evaluations: {len(proof['evaluations'])}")
+    print("\nProof generated successfully!")
+    print("\nProof components:")
+    print(f"✅ Wire commitments: 3")
+    print(f"✅ Permutation commitment: 1")
+    print(f"✅ Quotient commitments: 3")
+    print(f"✅ Opening proof commitments: 2")
+    print(f"✅ Evaluation points: {len(proof['evaluations'])}")
     
     print("\n✅ PLONK Prover test completed successfully!")

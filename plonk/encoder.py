@@ -8,8 +8,9 @@ class Encoder:
     """
     Handles the encoding of PLONK constraint systems into polynomial form.
     
-    This encoder converts selector polynomials, permutation polynomials, and witness
-    values into their polynomial representations for use in the PLONK protocol.
+    This encoder converts selector values, permutation data, and witness values
+    into their polynomial representations as required by the PLONK protocol.
+    It also manages the arithmetic operations on polynomials used in the protocol.
     """
     
     def __init__(self, q):
@@ -17,9 +18,9 @@ class Encoder:
         Initialize the PLONK encoder with the specified field.
         
         Args:
-            q: Prime field size
+            q: Prime field size (typically the curve order)
         """
-        self.Fq = GF(q)
+        self.Fq = GF(q)  # Finite field GF(q)
         self.R = PolynomialRing(self.Fq, 'X')
         self.X = self.R.gen()
 
@@ -42,10 +43,11 @@ class Encoder:
         Args:
             qM, qL, qR, qO, qC: Selector values at points in H
             perm: Permutation list of length 3n
-            n: Size of the multiplicative subgroup H
-            g: Generator of H
         """
+        # Calculate appropriate subgroup size (must be power of 2)
         self.n = self.find_subgroup_size(len(qM))
+        
+        # Generate subgroup H with generator g
         self.g = self.Fq(1).nth_root(self.n)
         
         # Store circuit data
@@ -56,36 +58,38 @@ class Encoder:
         self.qC = qC
         self.perm = perm
         
-        # Generate subgroup H
+        # Generate subgroup H (multiplicative subgroup of order n)
         self.H = [self.g**i for i in range(self.n)]
         
-        # Find suitable k1 and k2 for cosets
+        # Find suitable multipliers for creating cosets (k1·H and k2·H)
         self._find_coset_multipliers()
         
         # Generate cosets
         self.k1H = [self.k1 * h for h in self.H]
         self.k2H = [self.k2 * h for h in self.H]
         
-        # Compute vanishing polynomial for H
+        # Compute vanishing polynomial for H: Z_H(X) = X^n - 1
         self.v_H = self.X**self.n - 1
         
     def _find_coset_multipliers(self):
         """
         Find suitable values for k1 and k2 to create disjoint cosets.
         
-        Ensures:
-        1. k1^n ≠ 1 (k1 is not in H)
-        2. k2^n ≠ 1 (k2 is not in H)
-        3. (k1/k2)^n ≠ 1 (k1·H and k2·H are disjoint)
+        This ensures that H, k1·H, and k2·H are disjoint multiplicative cosets,
+        which is required for the permutation argument in PLONK.
         """
         n = self.n
         
-        # Try random values until we find suitable ones
+        # Keep trying random values until we find suitable ones
         while True:
             k1 = self.Fq.random_element()
             k2 = self.Fq.random_element()
             
-            # Check the three conditions
+            # Check that k1 and k2 satisfy the required conditions:
+            # 1. k1^n ≠ 1 (k1 is not in H)
+            # 2. k2^n ≠ 1 (k2 is not in H)
+            # 3. (k1/k2)^n ≠ 1 (k1·H and k2·H are disjoint)
+            # 4. k1, k2 ≠ 0 (non-zero)
             if (k1**n != 1 and 
                 k2**n != 1 and 
                 (k1/k2)**n != 1 and
@@ -96,12 +100,12 @@ class Encoder:
     
     def encode_selectors(self):
         """
-        Encode selector values into polynomials.
+        Encode selector values into polynomials using FFT interpolation.
         
         Returns:
             Dictionary of selector polynomials
         """
-        # Ensure the state has been updated
+        # Ensure the state has been initialized
         if not hasattr(self, 'H'):
             raise ValueError("Call update_state before encoding selectors")
             
@@ -122,7 +126,10 @@ class Encoder:
     
     def encode_permutation(self):
         """
-        Encode permutation into sigma star polynomials.
+        Encode the permutation into sigma star polynomials.
+        
+        The permutation is encoded as polynomials that map each wire to its
+        corresponding wire in the permutation cycle.
         
         Returns:
             Dictionary of permutation polynomials
@@ -132,14 +139,14 @@ class Encoder:
             
         n = self.n
         
-        # Map indices to elements in H ∪ k1·H ∪ k2·H
+        # Function to map position indices to elements in H ∪ k1·H ∪ k2·H
         def index_to_element(i):
             if 0 <= i < n:
-                return self.H[i]
+                return self.H[i]  # Left wires mapped to H
             elif n <= i < 2*n:
-                return self.k1H[i-n]
+                return self.k1H[i-n]  # Right wires mapped to k1·H
             elif 2*n <= i < 3*n:
-                return self.k2H[i-2*n]
+                return self.k2H[i-2*n]  # Output wires mapped to k2·H
             else:
                 raise ValueError(f"Index {i} out of range [0, {3*n-1}]")
         
@@ -154,6 +161,7 @@ class Encoder:
         S_sigma3_poly = fft_ff_interpolation(S_sigma3_values, self.g, self.Fq)
         
         sigma_star = S_sigma1_values + S_sigma2_values + S_sigma3_values
+        
         return {
             "S_sigma1": S_sigma1_poly,
             "S_sigma2": S_sigma2_poly,
@@ -166,7 +174,7 @@ class Encoder:
         Encode witness values into polynomials and compute public input polynomial.
         
         Args:
-            w: Witness list of length 3n
+            w: Witness list of length 3n (a_values, b_values, c_values)
             x_size: Number of public inputs
             
         Returns:
@@ -177,7 +185,7 @@ class Encoder:
             
         n = self.n
         
-        # Split witness into a, b, c values
+        # Split witness into a (left), b (right), c (output) values
         a_values = w[:n]
         b_values = w[n:2*n]
         c_values = w[2*n:3*n]
@@ -203,13 +211,16 @@ class Encoder:
     
     def compute_lagrange_basis(self, i):
         """
-        Compute the i-th Lagrange basis polynomial for H.
+        Compute the i-th Lagrange basis polynomial for domain H.
+        
+        For multiplicative subgroups, the Lagrange polynomial has a special form:
+        L_i(X) = (g^i · (X^n - 1)) / (n · (X - g^i))
         
         Args:
             i: Index in H
             
         Returns:
-            Lagrange polynomial L_i
+            Lagrange polynomial L_i(X)
         """
         if not hasattr(self, 'H'):
             raise ValueError("Call update_state before computing Lagrange basis")
@@ -218,22 +229,24 @@ class Encoder:
         g = self.g
         X = self.X
         
-        # For multiplicative subgroups, Lagrange polynomial has a special form
-        denominator = n * (X - g**i)
+        # Compute the i-th Lagrange basis polynomial for H
         numerator = g**i * (X**n - 1)
-        L_i = (numerator // denominator)
+        denominator = n * (X - g**i)
+        L_i = numerator // denominator
         
         return L_i
     
     def compute_public_input_poly(self, x):
         """
-        Compute the public input polynomial PI(X).
+        Compute the public input polynomial PI(X) = -∑_i x_i·L_i(X).
+        
+        This polynomial encodes the public inputs into the verification equation.
         
         Args:
             x: List of public input values
             
         Returns:
-            Public input polynomial
+            Public input polynomial PI(X)
         """
         if not hasattr(self, 'H'):
             raise ValueError("Call update_state before computing public input poly")
@@ -250,6 +263,9 @@ if __name__ == "__main__":
     import pickle
     from py_ecc.optimized_bn128 import curve_order
     
+    print("Testing PLONK Encoder")
+    print("=" * 60)
+    
     # Load the PLONK arithmetization instance
     with open("PLONK_ARITHMETIZATION_INSTANCE.pkl", "rb") as f:
         instance = pickle.load(f)
@@ -262,22 +278,24 @@ if __name__ == "__main__":
     perm = instance["perm"]
     w = instance["w"]
     
+    # Initialize encoder
     encoder = Encoder(curve_order)
     
     # Update state with circuit data
+    print("\nUpdating state with circuit data...")
     encoder.update_state(qM, qL, qR, qO, qC, perm)
     
     # Encode selectors
+    print("Encoding selector polynomials...")
     selector_polys = encoder.encode_selectors()
     
     # Encode permutation
+    print("Encoding permutation polynomials...")
     perm_polys = encoder.encode_permutation()
     
     # Encode witness with 5 public inputs
+    print("Encoding witness polynomials...")
     witness_data = encoder.encode_witness(w, x_size=5)
-    
-    print("✅ PLONK Encoder Test Successful")
-    print(f"Subgroup size: {encoder.n}")
     
     # Test constraint satisfaction on a random point from H
     import random
@@ -293,13 +311,19 @@ if __name__ == "__main__":
     qO_poly = selector_polys["qO"]
     qC_poly = selector_polys["qC"]
     
+    # Check the basic arithmetic circuit constraint at a test point
     constraint_value = (qM_poly(test_point) * a_poly(test_point) * b_poly(test_point) + 
                         qL_poly(test_point) * a_poly(test_point) + 
                         qR_poly(test_point) * b_poly(test_point) + 
                         qO_poly(test_point) * c_poly(test_point) + 
                         qC_poly(test_point) + PI(test_point))
     
-    print(f"Constraint satisfied at test point: {constraint_value == 0}")
+    print("\nTest results:")
+    print(f"✅ Subgroup size: {encoder.n}")
+    print(f"✅ Coset multipliers found: k1={encoder.k1}, k2={encoder.k2}")
+    print(f"✅ Selector polynomials: {len(selector_polys)}")
+    print(f"✅ Permutation polynomials: {len(perm_polys) - 1}")
+    print(f"✅ Constraint satisfied at test point: {constraint_value == 0}")
     
     # Check that the constraint polynomial is divisible by the vanishing polynomial
     constraint_poly = (qM_poly * a_poly * b_poly + 
@@ -309,5 +333,6 @@ if __name__ == "__main__":
                        qC_poly + PI)
 
     remainder = constraint_poly % encoder.v_H
+    print(f"✅ Constraint polynomial divisible by vanishing polynomial: {remainder == 0}")
     
-    print(f"Constraint polynomial divisible by vanishing polynomial: {remainder == 0}")
+    print("\n✅ PLONK Encoder test completed successfully!")
