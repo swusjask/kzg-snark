@@ -1,4 +1,4 @@
-from sage.all import *
+from sage.all import PolynomialRing
 
 def fft_ff(coeffs, w, F):
     """
