@@ -1,11 +1,9 @@
 from sage.all import prod
-import sys, os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from kzg import KZG
 from fft_ff import fft_ff, fft_ff_interpolation
-from encoder import Encoder
 from transcript import Transcript
+from marlin.encoder import Encoder
 
 class Prover:
     """
@@ -474,13 +472,13 @@ class Prover:
     
 if __name__ == "__main__":
     import pickle
-    from indexer import Indexer
+    from marlin.indexer import Indexer
     
     print("Testing Marlin Prover")
     print("=" * 60)
     
     # Load test instance
-    with open("R1CS_INSTANCE.pkl", "rb") as f:
+    with open("constraint-system/R1CS_INSTANCE.pkl", "rb") as f:
         RICS_INSTANCE = pickle.load(f)
     A, B, C, z = RICS_INSTANCE["A"], RICS_INSTANCE["B"], RICS_INSTANCE["C"], RICS_INSTANCE["z"]
     

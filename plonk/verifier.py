@@ -1,9 +1,6 @@
-import sys, os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from kzg import KZG
-from encoder import Encoder
 from transcript import Transcript
+from plonk.encoder import Encoder
 
 class Verifier:
     """
@@ -218,14 +215,14 @@ class Verifier:
 
 if __name__ == "__main__":
     import pickle
-    from indexer import Indexer
-    from prover import Prover
+    from plonk.indexer import Indexer
+    from plonk.prover import Prover
     
     print("Testing PLONK Verifier")
     print("=" * 60)
     
     # Load the PLONK arithmetization instance
-    with open("PLONK_ARITHMETIZATION_INSTANCE.pkl", "rb") as f:
+    with open("constraint-system/PLONK_ARITHMETIZATION_INSTANCE.pkl", "rb") as f:
         instance = pickle.load(f)
     
     # Extract instance data

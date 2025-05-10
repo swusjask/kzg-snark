@@ -1,8 +1,5 @@
-import sys, os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from kzg import KZG
-from encoder import Encoder
+from marlin.encoder import Encoder
 
 class Indexer:
     """
@@ -133,7 +130,7 @@ if __name__ == "__main__":
     print("=" * 60)
     
     # Load test instance
-    with open("R1CS_INSTANCE.pkl", "rb") as f:
+    with open("constraint-system/R1CS_INSTANCE.pkl", "rb") as f:
         RICS_INSTANCE = pickle.load(f)
     A, B, C, z = RICS_INSTANCE["A"], RICS_INSTANCE["B"], RICS_INSTANCE["C"], RICS_INSTANCE["z"]
     

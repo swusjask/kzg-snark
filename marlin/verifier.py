@@ -1,7 +1,5 @@
-import sys, os
 from sage.all import prod
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from kzg import KZG
 from transcript import Transcript
 
@@ -219,14 +217,14 @@ class Verifier:
 
 if __name__ == "__main__":
     import pickle
-    from indexer import Indexer
-    from prover import Prover
+    from marlin.indexer import Indexer
+    from marlin.prover import Prover
     
     print("Testing Marlin Verifier")
     print("=" * 60)
     
     # Load test instance
-    with open("R1CS_INSTANCE.pkl", "rb") as f:
+    with open("constraint-system/R1CS_INSTANCE.pkl", "rb") as f:
         RICS_INSTANCE = pickle.load(f)
     
     A = RICS_INSTANCE["A"]

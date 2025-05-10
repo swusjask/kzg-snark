@@ -1,7 +1,5 @@
-import sys, os
 from sage.all import vector, prod, PolynomialRing, GF
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from fft_ff import fft_ff_interpolation
 
 
@@ -243,7 +241,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # Load test instance
-    with open("R1CS_INSTANCE.pkl", "rb") as f:
+    with open("constraint-system/R1CS_INSTANCE.pkl", "rb") as f:
         RICS_INSTANCE = pickle.load(f)
 
     A, B, C, z = RICS_INSTANCE["A"], RICS_INSTANCE["B"], RICS_INSTANCE["C"], RICS_INSTANCE["z"]

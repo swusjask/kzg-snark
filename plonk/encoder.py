@@ -1,7 +1,5 @@
-import sys, os
 from sage.all import vector, prod, PolynomialRing, GF
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from fft_ff import fft_ff_interpolation
 
 class Encoder:
@@ -267,7 +265,7 @@ if __name__ == "__main__":
     print("=" * 60)
     
     # Load the PLONK arithmetization instance
-    with open("PLONK_ARITHMETIZATION_INSTANCE.pkl", "rb") as f:
+    with open("constraint-system/PLONK_ARITHMETIZATION_INSTANCE.pkl", "rb") as f:
         instance = pickle.load(f)
         
     qM = instance["qM"]
@@ -320,7 +318,6 @@ if __name__ == "__main__":
     
     print("\nTest results:")
     print(f"✅ Subgroup size: {encoder.n}")
-    print(f"✅ Coset multipliers found: k1={encoder.k1}, k2={encoder.k2}")
     print(f"✅ Selector polynomials: {len(selector_polys)}")
     print(f"✅ Permutation polynomials: {len(perm_polys) - 1}")
     print(f"✅ Constraint satisfied at test point: {constraint_value == 0}")
