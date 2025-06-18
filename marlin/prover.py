@@ -118,7 +118,7 @@ class Prover:
         while alpha in H:
             alpha = transcript.get_challenge("alpha-retry")
         
-        # Compute t(X) - the combined polynomial for r_M(α, X)
+        # Compute t(X) - the combined polynomial for η_M *  r_M(α, X)
         t = self._compute_t_polynomial(
             polynomials, eta_A, eta_B, eta_C, alpha, v_H, K, R
         )
@@ -180,25 +180,25 @@ class Prover:
         # Get third round challenge
         beta_2 = transcript.get_challenge("beta_2")
 
-        # p1(x) = zA(β₁)*zB(x) - zC(x) - h_0(x)*v_H(β₁)
-        p_1 = zA_masked(beta_1) * zB_masked - zC_masked - h_0 * v_H(beta_1)
+        # f1(x) = zA(β₁)*zB(x) - zC(x) - h_0(x)*v_H(β₁)
+        f_1 = zA_masked(beta_1) * zB_masked - zC_masked - h_0 * v_H(beta_1)
         
-        # p2(x) = s(x) + r(α, β₁)*(η_A*zA(β₁) + η_B*zB(x) + η_C*zC(x)) - t(β₁)*z(x) - h_1(x)*v_H(β₁) - β₁g_1(x)
+        # f2(x) = s(x) + r(α, β₁)*(η_A*zA(β₁) + η_B*zB(x) + η_C*zC(x)) - t(β₁)*z(x) - h_1(x)*v_H(β₁) - β₁g_1(x)
         z = w_masked * v_H_x(beta_1) + x_poly(beta_1)
-        p_2 = s + r(alpha, beta_1) * (eta_A * zA_masked(beta_1) + eta_B * zB_masked + eta_C * zC_masked) - t_beta1 * z - h_1 * v_H(beta_1) - beta_1 * g_1
+        f_2 = s + r(alpha, beta_1) * (eta_A * zA_masked(beta_1) + eta_B * zB_masked + eta_C * zC_masked) - t_beta1 * z - h_1 * v_H(beta_1) - beta_1 * g_1
 
-        # p3(x) = h_2(x)*v_K(β₂) - a(x) + b(β₂)*(β₂g_2(x) + t(β₁)/m)
+        # f3(x) = h_2(x)*v_K(β₂) - a(x) + b(β₂)*(β₂g_2(x) + t(β₁)/m)
         # a(x) = Σ η_M * v_H(β₁) * v_H(α) * val_M(x) Π_{N≠M} (β₁ - row_N(β₂))(α - col_N(β₂))
 
         a_lin, b_lin = self._compute_a_b_linear_polynomials(
             polynomials, eta_A, eta_B, eta_C, beta_1, beta_2, alpha, v_H, R, Fq
         )
 
-        p_3 = h_2 * v_K(beta_2) - a_lin + b_lin * (beta_2 * g_2 + t_beta1 / m)
+        f_3 = h_2 * v_K(beta_2) - a_lin + b_lin * (beta_2 * g_2 + t_beta1 / m)
 
-        assert p_1(beta_1) == 0, "p_1 polynomial is not well-defined"
-        assert p_2(beta_1) == 0, "p_2 polynomial is not well-defined"
-        assert p_3(beta_2) == 0, "p_3 polynomial is not well-defined"
+        assert f_1(beta_1) == 0, "f_1 polynomial is not well-defined"
+        assert f_2(beta_1) == 0, "f_2 polynomial is not well-defined"
+        assert f_3(beta_2) == 0, "f_3 polynomial is not well-defined"
         
         # Evaluate polynomials at the challenge points
         polys_beta1 = [zA_masked, t]
@@ -221,8 +221,8 @@ class Prover:
         xi_2 = transcript.get_challenge("xi_2")
         
         # Generate KZG batch proofs
-        polys_beta1 = [p_1, p_2] + polys_beta1
-        polys_beta2 = [p_3] + polys_beta2
+        polys_beta1 = [f_1, f_2] + polys_beta1
+        polys_beta2 = [f_3] + polys_beta2
         proof_beta1 = self.kzg.open(ck, polys_beta1, beta_1, xi_1)
         proof_beta2 = self.kzg.open(ck, polys_beta2, beta_2, xi_2)
         

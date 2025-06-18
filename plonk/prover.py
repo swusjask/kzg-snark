@@ -194,8 +194,6 @@ class Prover:
                 "t_lo": t_lo_commit,
                 "t_mid": t_mid_commit,
                 "t_hi": t_hi_commit,
-                "W_z": W_z,
-                "W_zw": W_zw
             },
             "evaluations": {
                 "a": a_zeta,
@@ -204,6 +202,10 @@ class Prover:
                 "s_sigma1": s_sigma1_zeta,
                 "s_sigma2": s_sigma2_zeta,
                 "z_omega": z_omega_zeta
+            },
+            "kzg_proofs": {
+                "W_z": W_z,
+                "W_zw": W_zw
             }
         }
         
@@ -455,10 +457,8 @@ if __name__ == "__main__":
     # Print proof statistics
     print("\nProof generated successfully!")
     print("\nProof components:")
-    print(f"✅ Wire commitments: 3")
-    print(f"✅ Permutation commitment: 1")
-    print(f"✅ Quotient commitments: 3")
-    print(f"✅ Opening proof commitments: 2")
-    print(f"✅ Evaluation points: {len(proof['evaluations'])}")
+    print(f"✅ Commitments: {len(proof['commitments'])}")
+    print(f"✅ Evaluations: {len(proof['evaluations'])}")
+    print(f"✅ KZG proofs: 2")
     
     print("\n✅ PLONK Prover test completed successfully!")

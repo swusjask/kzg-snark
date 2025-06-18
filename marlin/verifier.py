@@ -101,14 +101,14 @@ class Verifier:
         [t_comm, g1_comm, h1_comm] = second_round_commitments
         [g2_comm, h2_comm] = third_round_commitments
         
-        # Compute linearization polynomial p_1, p_2, p_3 commitments
+        # Compute linearization polynomial f1, f2, f3 commitments
 
-        # p1(x) = zA(β₁)*zB(x) - zC(x) - h_0(x)*v_H(β₁)
-        p1_comm = self.kzg.multiply(zB_comm, int(zA_beta1))
-        p1_comm = self.kzg.add(p1_comm, self.kzg.neg(zC_comm))
-        p1_comm = self.kzg.add(p1_comm, self.kzg.multiply(h0_comm, int(-v_H(beta_1))))
+        # f1(x) = zA(β₁)*zB(x) - zC(x) - h_0(x)*v_H(β₁)
+        f1_comm = self.kzg.multiply(zB_comm, int(zA_beta1))
+        f1_comm = self.kzg.add(f1_comm, self.kzg.neg(zC_comm))
+        f1_comm = self.kzg.add(f1_comm, self.kzg.multiply(h0_comm, int(-v_H(beta_1))))
 
-        # p2(x) = s(x) + r(α, β₁)*(η_A*zA(β₁) + η_B*zB(x) + η_C*zC(x)) - t(β₁)*z(x) - h_1(x)*v_H(β₁) - β₁g_1(x)
+        # f2(x) = s(x) + r(α, β₁)*(η_A*zA(β₁) + η_B*zB(x) + η_C*zC(x)) - t(β₁)*z(x) - h_1(x)*v_H(β₁) - β₁g_1(x)
         H_x = [g_H**i for i in range(len(x))]
         v_H_x_beta1 = prod([(beta_1 - H_x[i]) for i in range(len(x))])
         x_points = [(H_x[i], x[i]) for i in range(len(x))]
@@ -120,30 +120,30 @@ class Verifier:
 
         r_alpha_beta1 = (alpha**n - beta_1**n) / (alpha - beta_1)
 
-        p2_comm = s_comm
+        f2_comm = s_comm
         temp = self.kzg.multiply(self.kzg.G1, int(eta_A * zA_beta1))
         temp = self.kzg.add(temp, self.kzg.multiply(zB_comm, int(eta_B)))
         temp = self.kzg.add(temp, self.kzg.multiply(zC_comm, int(eta_C)))
         temp = self.kzg.multiply(temp, int(r_alpha_beta1))
-        p2_comm = self.kzg.add(p2_comm, temp)
-        p2_comm = self.kzg.add(p2_comm, self.kzg.multiply(z_comm, int(-t_beta1)))
-        p2_comm = self.kzg.add(p2_comm, self.kzg.multiply(h1_comm, int(-v_H(beta_1))))
-        p2_comm = self.kzg.add(p2_comm, self.kzg.multiply(g1_comm, int(-beta_1)))
+        f2_comm = self.kzg.add(f2_comm, temp)
+        f2_comm = self.kzg.add(f2_comm, self.kzg.multiply(z_comm, int(-t_beta1)))
+        f2_comm = self.kzg.add(f2_comm, self.kzg.multiply(h1_comm, int(-v_H(beta_1))))
+        f2_comm = self.kzg.add(f2_comm, self.kzg.multiply(g1_comm, int(-beta_1)))
 
-        # p3(x) = h_2(x)*v_K(β₂) - a(x) + b(β₂)*(β₂g_2(x) + t(β₁)/m)
+        # f3(x) = h_2(x)*v_K(β₂) - a(x) + b(β₂)*(β₂g_2(x) + t(β₁)/m)
 
         a_comm, b_lin = self._compute_a_b_linear(index_commitments, evals_beta2, beta_1, alpha, eta_A, eta_B, eta_C, v_H, Fq)
-        p3_comm = self.kzg.multiply(h2_comm, int(v_K(beta_2)))
-        p3_comm = self.kzg.add(p3_comm, self.kzg.neg(a_comm))
+        f3_comm = self.kzg.multiply(h2_comm, int(v_K(beta_2)))
+        f3_comm = self.kzg.add(f3_comm, self.kzg.neg(a_comm))
         temp = self.kzg.multiply(g2_comm, int(beta_2))
         temp = self.kzg.add(temp, self.kzg.multiply(self.kzg.G1, int(t_beta1 / m)))
         temp = self.kzg.multiply(temp, int(b_lin))
-        p3_comm = self.kzg.add(p3_comm, temp)
+        f3_comm = self.kzg.add(f3_comm, temp)
 
         # batch verify
-        beta1_commitments = [p1_comm, p2_comm, zA_comm, t_comm]
+        beta1_commitments = [f1_comm, f2_comm, zA_comm, t_comm]
         
-        beta2_commitments = [p3_comm]
+        beta2_commitments = [f3_comm]
 
         for matrix in ["A", "B", "C"]:
             for poly_type in ["row", "col"]:

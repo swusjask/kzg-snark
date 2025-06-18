@@ -52,8 +52,8 @@ class Verifier:
             proof["commitments"]["t_mid"],
             proof["commitments"]["t_hi"]
         ]
-        W_z = proof["commitments"]["W_z"]
-        W_zw = proof["commitments"]["W_zw"]
+        W_z = proof["kzg_proofs"]["W_z"]
+        W_zw = proof["kzg_proofs"]["W_zw"]
         
         # Extract evaluations
         a_zeta = proof["evaluations"]["a"]
