@@ -18,7 +18,7 @@ Implementation of KZG polynomial commitments and zkSNARK protocols (Marlin and P
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/kzg-snark.git
+git clone https://github.com/swusjask/kzg-snark.git
 cd kzg-snark
 
 # Install py_ecc
